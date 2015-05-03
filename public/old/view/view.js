@@ -16,8 +16,11 @@
 	Extender = core.Extender;
 
 	var Module = core.Module = Extender({
+		// runs immediately
 		cloned: function(){
+			// sets Module.invoke = .fork, which overrides .cloned
 			this.invoke = this.fork;
+			// but, if Module.clone, then we instantiate..? that doesn't make sense...
 			this.cloned = this.instantiate;
 		},
 		forkClonedHandler: function(){
