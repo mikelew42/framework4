@@ -237,10 +237,10 @@
 				return ext;
 		},
 		singleExtendCustom: function(base, ext, baseP, extP){
-			if (is.und(base) || is.val(base))
-				return ext;
-			else if (base.extend)
+			if (base && base.extend)
 				return base.extend.apply(base, ext);
+			else if (is.und(base) || is.val(base))
+				return ext;
 			else if (is.obj(ext))
 				return utils.iterativeExtend(base, ext);
 			else if (is.fn(base))
@@ -371,11 +371,181 @@
 		// base.assign.clone = assign.installer;
 	};
 
+	var clone = core.clone = Module({
+		_name: "clone",
+		invoke: "simple",
+		simple: function(value, base){
+			if (this.returnable(value))
+				return value;
+			
+			base = base || this.getBase(value);
+
+			this.iterate(value, base);
+
+			return base;
+		},
+		iterate: function(value, base){
+			for (var i in value)
+				if (i !== 'parent')
+					// base[i] = this.invoke(value[i]);
+					base[i] = this.simple(value[i]);
+		},
+		getBase: function(value){
+			return (value.Base && value.Base()) || 
+					(is.obj(value) && {}) || 
+					(is.arr(value) && []);
+		},
+		returnable: function(value){
+			return !is.def(value) || is.val(value) || (is.fn(value) && !value.Base);
+		}
+	});
+
+	clone.custom = clone.clone({
+		_name: "clone.custom",
+		invoke: "custom",
+		custom: function(value, base){
+			if (value && value.clone)
+				return value.clone(base);
+
+			if (this.returnable(value))
+				return value;
+
+			base = base || this.getBase(value);
+
+			this.iterate(value, base);
+
+			return base;
+		},
+		iterate: function(value, base){
+			for (var i in value)
+				if (i !== 'parent')
+					base[i] = this.custom(value[i]);
+		}
+	});
+
+	// this might not even be important for clone.oo
+	clone.skip = clone.custom.clone({
+		_name: "clone.skip",
+		invoke: "simple"
+		// note: iterate uses custom, because we're cloning the custom module here
+	});
+
+	clone.parental = clone.custom.clone({
+		_name: "clone.parental",
+		invoke: "parental",
+		parental: function(value, base){
+			if (value && value.clone)
+				return value.clone(base);
+
+			if (this.returnable(value))
+				return value;
+			
+			base = 	base || this.getBase(value);
+
+			// consider copying all first, then doing the inits
+			// this means mod.clone can't init... 
+			// or, we use mod.copy to dupe without init, and then come back and instantiate later
+			// if (value.config){
+			// 	if (value.config.clone)
+			// 		base.config = value.config.clone({parent: base});
+			// 	else
+			// 		base.config = value.config;
+			// }
+			// if (value.init){
+			// 	if (value.init.clone)
+			// 		base.init = value.init.clone({parent: base});
+			// 	else
+			// 		base.init = value.init;
+			// }
+
+			this.iterate(value, base);
+
+				// this.cloneChild(value, i, base);
+
+			return base;
+		},
+		iterate: function(value, base){
+			var child, nthParent;
+			for (var i in value){
+				if (i === 'parent' || i === "init" || i === 'config' || i === 'invoke')
+					continue;
+				child = value[i];
+				if (child && child.parent){
+					// this is an embedded child, recreate the pref
+					if (child.parent === value){
+						if (child.clone){
+							base[i] = child.clone({parent: base});
+						} else {
+							// base[i] = utils.parentalClone(child);
+							base[i] = this.getBase(child);
+							base[i].parent = base;
+							this.parental(child, base[i]);
+						}
+					// this child has a different parent, reassign the reference
+					} else if (nthP = this.nthParent(child, value)){
+						// n = 2
+						if (child.clone){
+							base[i] = child.clone({parent: this.getNthParent(base, nthP)});
+						} else {
+							base[i] = this.getBase(child);
+							base[i].parent = this.getNthParent(base, nthP);
+							this.parental(child, base[i]);
+						}
+					} else  {
+						base[i] = child;
+					}
+				} else {
+					base[i] = this.parental(child);
+				}
+			}
+		},
+		getNthParent: function(mod, n){
+			var parent = mod;
+			for (var i = 1; i < n; i++){
+				parent = parent.parent;
+			}
+			return parent;
+		},
+		nthParent: function(child, parent){
+			var nthP = 1;
+			while(parent){
+				if (child.parent === parent)
+					return nthP;
+				else {
+					if (parent.parent){
+						parent = parent.parent;
+						nthP++;
+					}
+					else return false;
+				}
+			}
+		}
+	});
+
+	// clone.parental.skip = clone.parental.clone({});
+	// clone.parental.oo = clone.parental.skip.clone?
+
+	clone.oo = clone.custom.clone({
+		_name: "clone.oo",
+		invoke: "oo",
+		oo: function(){
+			var c = this.getBase(this.parent);
+			// c = this.parentalClone(this, c, true);
+			this.iterate(this.parent, c);
+			// if (arguments.length && c.extend) c.extend.apply(c, arguments);
+			// if (c.configInvoke) c.configInvoke();
+			// if (c.instantiate) c.instantiate.apply(c, arguments);
+			// if (c.cloned) c.cloned.apply(c, arguments);
+			return c;
+		}
+	});
+
 
 	var Q = utils.Q = Module({
 		_name: "Q",
+		// invoke: 'combo', // not what we want - we want a delayed invoke --> combo
 		init: function(){
-			this._invoke = "combo";
+			this._invoke = "combo"; // to avoid having to use this._invoke at all, could use a setter for .invoke so when you set .invoke = "str", it would automatically set to this.str, and also set this._invoke = 'str' for next time
 			this.then = this.append;
 			this.execCount = 0;
 			this.ccbs = this.ccbs || [];
