@@ -201,6 +201,15 @@ describe("core.utils", function(){
 			myMod2({prop2: 4});
 			expect(myMod2.prop2).toBe(4);
 		});
+		
+		it("should auto adopt", function(){
+			var Sub = Module({ _autoAdopt: true, test: 123 });
+			var Mod = Module({ sub: Sub() });
+			expect(Mod.sub.test).toBe(123);
+			expect(Mod.sub._name).toBe('sub');
+			expect(Mod.sub.parent).toBe(Mod);
+		});
+
 	});
 
 	describe("Q", function(){
@@ -272,46 +281,50 @@ describe("core.utils", function(){
 			expect(check).toBe(3);
 		});
 
-		xit("could be used for config and init Qing", function(){
-			var Mod = utils.Module({ _name: "Mod", log: true });
+		it("could be used for config and init Qing", function(){
+			var log = false, Mod = utils.Module({ _name: "Mod", log: log,
+				cloned: function(){
+					// console.log("Mod.cloned");
+					this.parent = utils.GetSet(); 
+				} });
 			
-			console.log("created Mod, adding Mod.init:");
+			log && console.log("created Mod, adding Mod.init:");
 			Mod.init = Q({parent: Mod, _name:"init", condition: function(){ return this.execCount > 0; } });
 			
-			console.log("added Mod.init, calling Mod.init():");
+			log && console.log("added Mod.init, calling Mod.init():");
 			Mod.init();
 
-			console.log("called Mod.init(), adding Mod.init(cb):");
+			log && console.log("called Mod.init(), adding Mod.init(cb):");
 			Mod.init(function(){
-				console.log(this._name + ".init");
+				log && console.log(this._name + ".init");
 			});
 
-			console.log("added Mod.init(cb), creating mod = Mod()");
+			log && console.log("added Mod.init(cb), creating mod = Mod()");
 			var mod = Mod({ _name: "mod" });
 
-			console.log("created mod = Mod(), creating Sub = Mod()");
+			log && console.log("created mod = Mod(), creating Sub = Mod()");
 			var Sub = Mod({ 
 				_name: "Sub",
 				config: function(){
-					console.group(this._name + ".config");
-					console.log(this.parent);
+					log && console.group(this._name + ".config");
 					this.init();
-					console.groupEnd();
+					log &&  console.groupEnd();
 				}
 			});
-			Sub.parent = utils.GetSet();
-			console.log(Sub.parent);
+			// Sub.parent = utils.GetSet();
 			expect(Sub.parent()).not.toBeDefined();
-			debugger;
+
 			mod.sub1 = Sub({ _name: "sub1", parent: mod });
 			// the problem here, is that the parent property isn't cloned, and so
 			// when it comes time to extend it, it appears as an undefined property.
 
 
 			expect(mod.sub1.parent()).toBe(mod);
-			mod.sub2 = Sub({ _name: "sub2" });
-			console.log('+++');
+			mod.sub2 = Sub({ _name: "sub2", parent: mod });
+
 			var mod2 = mod();
+			expect(mod2.sub1).not.toBe(mod.sub1);
+			expect(mod2.sub1.parent()).toBe(mod2);
 
 		});
 	});
@@ -364,6 +377,32 @@ describe("core.clone", function(){
 		});
 	});
 
+	describe("clone.parental", function(){
+		var clone = core.clone.parental;
+		it("should be defined", function(){
+			expect(clone.invoke).toBe(clone.parental);
+		});
+		it("should reassign prefs", function(){
+			var gp = {
+				p: {
+					gc: {}
+				}
+			};
+
+			gp.p.parent = gp;
+			gp.p.gc.parent = gp;
+
+			// here, the grand child references grand parent as parent
+
+			expect(gp.p.gc.parent).toBe(gp);
+
+			gpclone = clone(gp);
+			expect(gpclone.p.gc.parent).toBe(gpclone);
+			
+			expect(gp.p.gc.parent).toBe(gp);
+		});
+	});
+
 	describe("clone.oo", function(){
 		var clone = core.clone.oo;
 		it("should be defined", function(){
@@ -377,17 +416,66 @@ describe("core.clone", function(){
 				test: 123
 			};
 			obj.clone = clone.clone({parent: obj});
-			expect(obj.clone().prop).toBe(6);
-			// expect(obj.clone()).toEqual({ prop: 6, test: 123 }); // doesn't work, because we're not doing a parental clone
-			expect(obj.clone().clone).not.toBe(obj.clone);
-			// expect(obj.clone().clone.parent).toBeDefined();
 
 			var c = obj.clone();
+			expect(c.prop).toBe(6);
 			expect(c.test).toBe(123);
-			// doesn't work, because c.clone.parent hasn't been relinked.
-			// var d = c.clone();
-
-
+			expect(c.clone).not.toBe(obj.clone);
+			expect(c.clone.parent).toBe(c);
+			
+			c.test = 456;
+			var d = c.clone();
+			expect(d.test).toBe(456);
+			expect(d.clone.parent).toBe(d);
 		});
+	});
+});
+
+describe("utils.Mod", function(){
+	var Mod = core.utils.Mod;
+	it("should be defined", function(){
+		expect(Mod.invoke).toBe(Mod.clone);
+		var mod = Mod();
+		expect(mod.invoke).toBe(mod.clone);
+	});
+
+	it("should clone itself", function(){
+		var MyMod = Mod();
+		MyMod.prop = 5;
+		MyMod.obj = { one: 1, two: "three" };
+
+		var myMod = MyMod();
+		expect(myMod.prop).toBe(5);
+		expect(myMod.obj).toEqual(MyMod.obj);
+		expect(myMod.obj).not.toBe(MyMod.obj);
+
+		myMod.prop = 6;
+		var myMod2 = myMod();
+		myMod2.prop = 7;
+		expect(MyMod.prop).toBe(5);
+		expect(myMod.prop).toBe(6);
+		expect(myMod2.prop).toBe(7);
+		expect(MyMod.clone).not.toBe(myMod.clone);
+		expect(myMod.clone).not.toBe(myMod2.clone);
+	});
+});
+
+$(function(){
+
+	describe("List", function(){
+		var List = core.List;
+		it("should be defined", function(){
+			expect(List).toBeDefined();
+			expect(List.view.parent()).toBe(List);
+		});
+		it("should fire a change event when adding items", function(){
+			list = List.clone();
+			list.append("yo");
+			expect(list.view.parent()).toBe(list);
+
+			var list2 = list.clone();
+			list2.append("Fuck yea..");
+		});
+
 	});
 });
